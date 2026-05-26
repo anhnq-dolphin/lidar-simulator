@@ -24,6 +24,7 @@ SHIP_NAMES = [
     "Frigg",
     "Njord",
 ]
+RECONNECT_DELAY_SECONDS = 3
 
 
 @dataclass
@@ -107,25 +108,35 @@ class SimLidarService(SimLidarServiceInterface):
         ships = _make_initial_ships(rnd, req.ship_count)
 
         try:
-            log_info("sim lidar connecting ws_url=%s", req.ws_url)
-            async with websockets.connect(req.ws_url) as ws:
-                log_info("sim lidar connected ws_url=%s", req.ws_url)
-                while True:
-                    payload = _make_payload(
-                        rnd=rnd,
-                        ships=ships,
-                        mode=req.mode,
-                        delta_seconds=interval,
+            while True:
+                try:
+                    log_info("sim lidar connecting ws_url=%s", req.ws_url)
+                    async with websockets.connect(req.ws_url) as ws:
+                        log_info("sim lidar connected ws_url=%s", req.ws_url)
+                        while True:
+                            payload = _make_payload(
+                                rnd=rnd,
+                                ships=ships,
+                                mode=req.mode,
+                                delta_seconds=interval,
+                            )
+                            message = json.dumps(payload)
+                            await ws.send(message)
+                            log_debug("sim lidar sent payload=%s", message)
+                            await asyncio.sleep(interval)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    log_error(
+                        "sim lidar connection failed ws_url=%s error=%s reconnect_in=%ss",
+                        req.ws_url,
+                        exc,
+                        RECONNECT_DELAY_SECONDS,
                     )
-                    message = json.dumps(payload)
-                    await ws.send(message)
-                    log_debug("sim lidar sent payload=%s", message)
-                    await asyncio.sleep(interval)
+                    await asyncio.sleep(RECONNECT_DELAY_SECONDS)
         except asyncio.CancelledError:
             log_info("sim lidar task cancelled ws_url=%s", req.ws_url)
             raise
-        except Exception as exc:
-            log_error("sim lidar failed ws_url=%s error=%s", req.ws_url, exc)
         finally:
             state = self.repo.get_state()
             self.repo.set_state(
