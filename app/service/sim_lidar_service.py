@@ -205,6 +205,7 @@ def _make_payload(
 
 def _move_ships(rnd: random.Random, ships: list[_SimShip], delta_seconds: float) -> None:
     for ship in ships:
+        ship.speed = _clamp(ship.speed + rnd.uniform(-0.25, 0.25), 3, 18)
         noise = rnd.uniform(-0.4, 0.4)
         ship.distance += ship.direction * ship.speed * delta_seconds + noise
 
@@ -214,3 +215,7 @@ def _move_ships(rnd: random.Random, ships: list[_SimShip], delta_seconds: float)
         elif ship.distance > 500:
             ship.distance = rnd.uniform(50, 120)
             ship.direction = 1
+
+
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return round(max(minimum, min(maximum, value)), 2)
