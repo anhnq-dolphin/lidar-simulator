@@ -550,12 +550,13 @@ def _make_initial_lidar_ships(rnd: random.Random, ship_count: int) -> list[_Lida
             object_type = 2   # Small Vessel
         else:
             object_type = 3   # Speedboat
-        # place ships within ~2 km radius of reference point
-        offset_m = rnd.uniform(200, 2000)
+        # place ships starting from 100m (spread slightly between 90m and 100m)
+        offset_m = rnd.uniform(90, 100)
         bearing = rnd.uniform(0, 360)
         bearing_rad = math.radians(bearing)
         dlat = offset_m * math.cos(bearing_rad) / 111_000
         dlon = offset_m * math.sin(bearing_rad) / (111_000 * math.cos(math.radians(_REF_LAT)))
+        heading = (bearing + 180) % 360
         ships.append(
             _LidarShip(
                 object_id=idx,
@@ -563,8 +564,8 @@ def _make_initial_lidar_ships(rnd: random.Random, ship_count: int) -> list[_Lida
                 lat=round(_REF_LAT + dlat, 7),
                 lon=round(_REF_LON + dlon, 7),
                 ele=round(rnd.uniform(2, 8), 2),
-                speed=round(rnd.uniform(3, 18), 2),
-                heading=round(rnd.uniform(0, 360), 1),
+                speed=round(rnd.uniform(2, 5), 2),  # Reasonable speed to see countdown clearly
+                heading=round(heading, 1),
                 length=length,
                 width=width,
                 height=round(rnd.uniform(3, 30), 2),
@@ -575,8 +576,30 @@ def _make_initial_lidar_ships(rnd: random.Random, ship_count: int) -> list[_Lida
 
 def _move_lidar_ships(rnd: random.Random, ships: list[_LidarShip], delta_seconds: float) -> None:
     for ship in ships:
-        ship.speed = _clamp(ship.speed + rnd.uniform(-0.25, 0.25), 3, 18)
-        ship.heading = (ship.heading + rnd.uniform(-2, 2)) % 360
+        # Calculate current distance to reference point
+        dlat = (ship.lat - _REF_LAT) * 111320
+        dlon = (ship.lon - _REF_LON) * 111320 * math.cos(math.radians(_REF_LAT))
+        distance_m = math.sqrt(dlat**2 + dlon**2)
+
+        # If too close, reset to 100m away
+        if distance_m < 5.0:
+            bearing = rnd.uniform(0, 360)
+            bearing_rad = math.radians(bearing)
+            dlat_new = 100.0 * math.cos(bearing_rad) / 111_000
+            dlon_new = 100.0 * math.sin(bearing_rad) / (111_000 * math.cos(math.radians(_REF_LAT)))
+            ship.lat = round(_REF_LAT + dlat_new, 7)
+            ship.lon = round(_REF_LON + dlon_new, 7)
+            ship.heading = round((bearing + 180) % 360, 1)
+            ship.speed = round(rnd.uniform(2, 5), 2)
+            continue
+
+        # Adjust heading to point directly towards the reference point
+        dy = _REF_LAT - ship.lat
+        dx = (_REF_LON - ship.lon) * math.cos(math.radians(_REF_LAT))
+        angle_rad = math.atan2(dx, dy)
+        ship.heading = round(math.degrees(angle_rad) % 360, 1)
+
+        ship.speed = _clamp(ship.speed + rnd.uniform(-0.1, 0.1), 2, 6)
         heading_rad = math.radians(ship.heading)
         d = ship.speed * delta_seconds
         ship.lat += d * math.cos(heading_rad) / 111_000
@@ -596,6 +619,12 @@ def _make_lidar_packet(ships: list[_LidarShip], msg_cnt: int, mode: str = "live"
         speed = ship.speed
         if mode == "anomaly" and ship.object_id == 1:
             speed = 999.99
+
+        # Calculate distance to reference point in meters
+        dlat = (ship.lat - _REF_LAT) * 111320
+        dlon = (ship.lon - _REF_LON) * 111320 * math.cos(math.radians(_REF_LAT))
+        distance_m = math.sqrt(dlat**2 + dlon**2)
+
         objects.append({
             "objectID": ship.object_id,
             "objectType": ship.object_type,
@@ -613,6 +642,7 @@ def _make_lidar_packet(ships: list[_LidarShip], msg_cnt: int, mode: str = "live"
                 "height": int(ship.height * 20),
             },
             "dataSource": 6,
+            "distance": int(distance_m * 100),
         })
 
     if not objects:
